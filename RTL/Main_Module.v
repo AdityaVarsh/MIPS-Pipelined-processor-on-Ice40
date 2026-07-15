@@ -15,14 +15,28 @@
 `include "PC.v"
 
 module main(
-    input  wire clk,
-    input  wire rst,
-    input  wire interrupt
+    input  wire        clk,
+    input  wire        rst,
+    input  wire        interrupt,
+    output wire [31:0] debug_pc,
+    output wire [31:0] debug_instr,
+    output wire        debug_wb_wr,
+    output wire [4:0]  debug_wb_rd,
+    output wire [31:0] debug_wb_data,
+    output wire        debug_stall,
+    output wire        debug_flush
 );
 
     wire pc_write;
     wire mispredict;                  // was: pc_src. now means "redirect b/c wrong guess"
     wire [31:0] pc_reg, pc_incr, instr, pc_next;
+    assign debug_pc      = pc_reg;
+    assign debug_instr   = instr;
+    assign debug_wb_wr   = wb_regwrite;
+    assign debug_wb_rd   = wb_rd;
+    assign debug_wb_data = wb_wr_data;
+    assign debug_stall   = ~pc_write;
+    assign debug_flush   = mispredict;
     wire [31:0] redirect_pc;          // correct PC to resteer to on a misprediction
 
     assign pc_incr = pc_reg + 32'd4;
@@ -91,61 +105,38 @@ module main(
     reg [31:0] mem_pred_npc;
     reg [31:0] mem_pred_pc;
 
-    // IF -> ID : same enable + flush as IfId
+    // IF -> ID : pred_taken NEEDS reset (guards the mux select on startup).
+    //            pred_npc/pc do NOT (irrelevant when pred_taken=0).
     always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            id_pred_taken <= 1'b0;
-            id_pred_npc   <= 32'b0;
-            id_pred_pc    <= 32'b0;
-        end 
-        else if (interr_flush) begin
-            id_pred_taken <= 1'b0;
-            id_pred_npc   <= 32'b0;
-            id_pred_pc    <= 32'b0;
-        end
-        else if (ifid_write) begin
-            id_pred_taken <= if_pred_taken;
-            id_pred_npc   <= pc_predicted;
-            id_pred_pc    <= pc_reg;
-        end
+        if      (rst)          id_pred_taken <= 1'b0;
+        else if (interr_flush) id_pred_taken <= 1'b0;
+        else if (ifid_write)   id_pred_taken <= if_pred_taken;
+    end
+    always @(posedge clk) begin
+        if      (interr_flush) begin id_pred_npc <= 32'b0; id_pred_pc <= 32'b0; end
+        else if (ifid_write)   begin id_pred_npc <= pc_predicted; id_pred_pc <= pc_reg; end
     end
 
-    // ID -> EX : flush only (always advances), like IdEx
+    // ID -> EX
     always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            ex_pred_taken <= 1'b0;
-            ex_pred_npc   <= 32'b0;
-            ex_pred_pc    <= 32'b0;
-        end 
-        else if (interr_flush) begin
-            ex_pred_taken <= 1'b0;
-            ex_pred_npc   <= 32'b0;
-            ex_pred_pc    <= 32'b0;
-        end
-        else begin
-            ex_pred_taken <= id_pred_taken;
-            ex_pred_npc   <= id_pred_npc;
-            ex_pred_pc    <= id_pred_pc;
-        end
+        if      (rst)          ex_pred_taken <= 1'b0;
+        else if (interr_flush) ex_pred_taken <= 1'b0;
+        else                   ex_pred_taken <= id_pred_taken;
+    end
+    always @(posedge clk) begin
+        if (interr_flush) begin ex_pred_npc <= 32'b0; ex_pred_pc <= 32'b0; end
+        else              begin ex_pred_npc <= id_pred_npc; ex_pred_pc <= id_pred_pc; end
     end
 
-    // EX -> MEM : flush only, like Ex_Mem
+    // EX -> MEM
     always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            mem_pred_taken <= 1'b0;
-            mem_pred_npc   <= 32'b0;
-            mem_pred_pc    <= 32'b0;
-        end 
-        else if (flush) begin
-            mem_pred_taken <= 1'b0;
-            mem_pred_npc   <= 32'b0;
-            mem_pred_pc    <= 32'b0;
-        end
-        else begin
-            mem_pred_taken <= ex_pred_taken;
-            mem_pred_npc   <= ex_pred_npc;
-            mem_pred_pc    <= ex_pred_pc;
-        end
+        if      (rst)   mem_pred_taken <= 1'b0;
+        else if (flush) mem_pred_taken <= 1'b0;
+        else            mem_pred_taken <= ex_pred_taken;
+    end
+    always @(posedge clk) begin
+        if (flush) begin mem_pred_npc <= 32'b0; mem_pred_pc <= 32'b0; end
+        else       begin mem_pred_npc <= ex_pred_npc; mem_pred_pc <= ex_pred_pc; end
     end
 
     wire [4:0] id_rs1, id_rs2, id_rd;
@@ -231,9 +222,9 @@ module main(
         .id_dat1(id_dat1),
         .id_dat2(id_dat2),
         .id_imm(id_imm),
-        .id_rs1(id_rs1),
-        .id_rs2(id_rs2),
-        .id_rd(id_rd),
+        .id_rs1(cntrl ? id_rs1 : 5'b0),
+        .id_rs2(cntrl ? id_rs2 : 5'b0),
+        .id_rd (cntrl ? id_rd  : 5'b0),
         .ex_control_sig(ex_control_sig),
         .ex_pc(ex_pc),
         .ex_dat1(ex_dat1),

@@ -1,31 +1,33 @@
-module uart_tx #(
+module uart_tx #
+(
     parameter CLK_FREQ = 12000000,
     parameter BAUD     = 115200
-)(
+)
+(
     input  wire clk,
     input  wire rst,
 
     input  wire [7:0] data,
-    input  wire send,
+    input  wire start,
 
     output reg tx,
     output reg busy
 );
 
-localparam CLKS_PER_BIT = CLK_FREQ / BAUD;
+localparam integer DIV = CLK_FREQ / BAUD;
 
-reg [15:0] clk_count;
-reg [3:0]  bit_index;
-reg [9:0]  shift_reg;
+reg [15:0] baud_cnt;
+reg [3:0] bit_cnt;
+reg [9:0] shift;
 
 always @(posedge clk) begin
 
     if (rst) begin
-        tx        <= 1'b1;
-        busy      <= 1'b0;
-        clk_count <= 0;
-        bit_index <= 0;
-        shift_reg <= 10'h3FF;
+        tx <= 1'b1;
+        busy <= 1'b0;
+        baud_cnt <= 0;
+        bit_cnt <= 0;
+        shift <= 10'h3FF;
     end
 
     else begin
@@ -34,38 +36,40 @@ always @(posedge clk) begin
 
             tx <= 1'b1;
 
-            if (send) begin
-                busy      <= 1'b1;
-                shift_reg <= {1'b1, data, 1'b0};   // stop,data,start
-                clk_count <= 0;
-                bit_index <= 0;
+            if (start) begin
+
+                busy <= 1'b1;
+
+                shift <= {1'b1, data, 1'b0};
+
+                bit_cnt <= 10;
+
+                baud_cnt <= DIV-1;
+
             end
 
         end
 
         else begin
 
-            tx <= shift_reg[0];
+            if (baud_cnt == 0) begin
 
-            if (clk_count == CLKS_PER_BIT-1) begin
+                tx <= shift[0];
 
-                clk_count <= 0;
+                shift <= {1'b1, shift[9:1]};
 
-                shift_reg <= {1'b1, shift_reg[9:1]};
+                bit_cnt <= bit_cnt - 1;
 
-                if (bit_index == 9) begin
+                baud_cnt <= DIV-1;
+
+                if (bit_cnt == 4'd1)
                     busy <= 1'b0;
-                end
-
-                else begin
-                    bit_index <= bit_index + 1;
-                end
 
             end
 
-            else begin
-                clk_count <= clk_count + 1;
-            end
+            else
+
+                baud_cnt <= baud_cnt - 1;
 
         end
 

@@ -1,7 +1,11 @@
 module top(
 
-    input wire clk,
-    output wire [2:0] io_led
+    input  wire clk,
+
+    output wire [2:0] io_led,
+
+    input  wire RX,
+    output wire TX
 
 );
 
@@ -13,17 +17,24 @@ module top(
     reg rst = 1'b1;
 
     always @(posedge clk) begin
-        if (reset_counter != 16'hFFFF) begin
+
+        if(reset_counter != 16'hFFFF) begin
+
             reset_counter <= reset_counter + 1'b1;
             rst <= 1'b1;
+
         end
+
         else begin
+
             rst <= 1'b0;
+
         end
+
     end
 
     //--------------------------------------------------
-    // Debug Signals
+    // CPU Debug Signals
     //--------------------------------------------------
 
     wire [31:0] debug_pc;
@@ -33,12 +44,48 @@ module top(
     //--------------------------------------------------
 
     main cpu(
+        .clk          (clk),
+        .rst          (rst),
+        .interrupt    (1'b0),
+        .debug_pc     (debug_pc),
+        .debug_instr  (debug_instr),
+        .debug_wb_wr  (debug_wb_wr),
+        .debug_wb_rd  (debug_wb_rd),
+        .debug_wb_data(debug_wb_data),
+        .debug_stall  (debug_stall),
+        .debug_flush  (debug_flush)
+    );
 
-        .clk(clk),
-        .rst(rst),
-        .interrupt(1'b0),
+    wire [31:0] debug_instr;
+    wire        debug_wb_wr;
+    wire [4:0]  debug_wb_rd;
+    wire [31:0] debug_wb_data;
+    wire        debug_stall;
+    wire        debug_flush;
 
-        .debug_pc(debug_pc)
+    //--------------------------------------------------
+    // UART Debug Console
+    //--------------------------------------------------
+
+    debug_uart #(
+
+        .CLK_FREQ(12000000),
+        .BAUD(115200),
+        .PERIOD(1200000)   // 10 prints per second at 12 MHz
+
+    )
+    dbg(
+
+        .clk    (clk),
+        .rst    (rst),
+        .pc     (debug_pc),
+        .instr  (debug_instr),
+        .wb_wr  (debug_wb_wr),
+        .wb_rd  (debug_wb_rd),
+        .wb_data(debug_wb_data),
+        .stall  (debug_stall),
+        .flush  (debug_flush),
+        .tx     (TX)
 
     );
 

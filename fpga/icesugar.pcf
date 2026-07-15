@@ -3,3 +3,6 @@ set_io io_led[1] 40
 set_io io_led[2] 41
 
 set_io clk 35
+
+set_io RX 4
+set_io TX 6
